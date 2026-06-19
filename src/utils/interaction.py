@@ -6,7 +6,13 @@ from screeninfo import get_monitors
 from src.logger import logger
 from src.utils.image import ImageUtils
 
-monitor_window = get_monitors()[0]
+try:
+    monitor_window = get_monitors()[0]
+except Exception:
+    # Headless environment (Docker/CI) — no display available; use sentinel dimensions
+    from dataclasses import make_dataclass as _mdc
+    _Sentinel = _mdc("_Sentinel", ["width", "height"])
+    monitor_window = _Sentinel(width=1920, height=1080)
 
 
 @dataclass

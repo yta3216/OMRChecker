@@ -80,6 +80,7 @@ class ImageInstanceOps:
             # Overlay Transparencies
             alpha = 0.65
             omr_response = {}
+            confidence_map = {}
             multi_marked, multi_roll = 0, 0
 
             # TODO Make this part useful for visualizing status checks
@@ -277,7 +278,7 @@ class ImageInstanceOps:
                     no_outliers = all_q_std_vals[total_q_strip_no] < global_std_thresh
                     # print(total_q_strip_no, field_block_bubbles[0].field_label,
                     #   all_q_std_vals[total_q_strip_no], "no_outliers:", no_outliers)
-                    per_q_strip_threshold = self.get_local_threshold(
+                    per_q_strip_threshold, strip_max1 = self.get_local_threshold(
                         all_q_strip_arrs[total_q_strip_no],
                         global_thr,
                         no_outliers,
@@ -287,6 +288,9 @@ class ImageInstanceOps:
                     # print(field_block_bubbles[0].field_label,key,block_q_strip_no, "THR: ",
                     #   round(per_q_strip_threshold,2))
                     per_omr_threshold_avg += per_q_strip_threshold
+                    _min_jump = config.threshold_params.MIN_JUMP
+                    _surplus = max(1, config.threshold_params.CONFIDENT_SURPLUS)
+                    strip_confidence = min(1.0, max(0.0, (strip_max1 - _min_jump) / _surplus))
 
                     # Note: Little debugging visualization - view the particular Qstrip
                     # if(
@@ -364,6 +368,14 @@ class ImageInstanceOps:
                         field_label = field_block_bubbles[0].field_label
                         omr_response[field_label] = field_block.empty_val
 
+                    # Record confidence for this strip's field label
+                    strip_field_label = field_block_bubbles[0].field_label
+                    # Multi-marked questions are flagged with 0.0 confidence
+                    if strip_field_label in omr_response and len(omr_response[strip_field_label]) > 1:
+                        confidence_map[strip_field_label] = 0.0
+                    else:
+                        confidence_map[strip_field_label] = strip_confidence
+
                     if config.outputs.show_image_level >= 5:
                         if key in all_c_box_vals:
                             q_nums[key].append(f"{key[:2]}_c{str(block_q_strip_no)}")
@@ -427,7 +439,7 @@ class ImageInstanceOps:
                 for i in range(config.outputs.save_image_level):
                     self.save_image_stacks(i + 1, name, save_dir)
 
-            return omr_response, final_marked, multi_marked, multi_roll
+            return omr_response, confidence_map, final_marked, multi_marked, multi_roll
 
         except Exception as e:
             raise e
@@ -628,6 +640,9 @@ class ImageInstanceOps:
         # Sort the Q bubbleValues
         q_vals = sorted(q_vals)
 
+        # max1 tracks the largest intensity gap found; used by callers for confidence scoring
+        max1 = config.threshold_params.MIN_JUMP
+
         # Small no of pts cases:
         # base case: 1 or 2 pts
         if len(q_vals) < 3:
@@ -656,7 +671,7 @@ class ImageInstanceOps:
             # else:
             # Find the LARGEST GAP and set it as threshold: //(FIRST LARGE GAP)
             l = len(q_vals) - 1
-            max1, thr1 = config.threshold_params.MIN_JUMP, 255
+            max1, thr1 = max1, 255
             for i in range(1, l):
                 jump = q_vals[i + 1] - q_vals[i - 1]
                 if jump > max1:
@@ -696,7 +711,7 @@ class ImageInstanceOps:
             # appendSaveImg(6,getPlotImg())
             if plot_show:
                 plt.show()
-        return thr1
+        return thr1, max1
 
     def append_save_img(self, key, img):
         if self.save_image_level >= int(key):
