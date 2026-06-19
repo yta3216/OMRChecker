@@ -258,6 +258,7 @@ def process_files(
         save_dir = outputs_namespace.paths.save_marked_dir
         (
             response_dict,
+            _confidence_map,
             final_marked,
             multi_marked,
             _,

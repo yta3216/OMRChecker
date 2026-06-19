@@ -242,6 +242,7 @@ class EvaluationConfig:
                     )
                 (
                     response_dict,
+                    _confidence_map,
                     _final_marked,
                     _multi_marked,
                     _multi_roll,
