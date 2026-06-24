@@ -368,13 +368,19 @@ class ImageInstanceOps:
                         field_label = field_block_bubbles[0].field_label
                         omr_response[field_label] = field_block.empty_val
 
-                    # Record confidence for this strip's field label
+                    # Record confidence for this strip's field label.
+                    # Confidence measures how cleanly the marks were DETECTED, not
+                    # whether the answer is a clean single bubble. A multi-marked
+                    # strip with several solidly-filled bubbles is a high-confidence
+                    # detection (we are sure what is on the page) and may be the
+                    # intended answer on a "select all that apply" question. Forcing
+                    # it to 0.0 here conflated "multi-marked" with "uncertain" and
+                    # fought the downstream review-flagging logic, which already
+                    # leaves a multi-mark that matches the answer key unflagged.
+                    # Whether a multi-mark needs review is decided by the caller
+                    # against the answer key — not here.
                     strip_field_label = field_block_bubbles[0].field_label
-                    # Multi-marked questions are flagged with 0.0 confidence
-                    if strip_field_label in omr_response and len(omr_response[strip_field_label]) > 1:
-                        confidence_map[strip_field_label] = 0.0
-                    else:
-                        confidence_map[strip_field_label] = strip_confidence
+                    confidence_map[strip_field_label] = strip_confidence
 
                     if config.outputs.show_image_level >= 5:
                         if key in all_c_box_vals:
