@@ -694,6 +694,18 @@ class ImageInstanceOps:
                 if no_outliers:
                     # All Black or All White case
                     thr1 = global_thr
+                    # A uniform strip has no interior gap for max1 to capture, so
+                    # the gap-based confidence upstream reports ~0 even when the
+                    # read is unambiguous — e.g. a "select all that apply" question
+                    # with every bubble filled, or a cleanly blank one. That forced
+                    # such questions into manual review despite a confident read.
+                    # Derive the jump from the strip's distance to the global
+                    # threshold instead (same intensity units as max1): a uniform
+                    # strip sitting far from the threshold is a confident detection,
+                    # while one hugging the threshold stays low-confidence. Only
+                    # raises max1 (confidence); thr1 already decided, so detection
+                    # is unchanged.
+                    max1 = max(max1, abs(float(np.mean(q_vals)) - global_thr))
                 else:
                     # TODO: Low confidence parameters here
                     pass
