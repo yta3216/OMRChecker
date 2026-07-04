@@ -652,11 +652,24 @@ class ImageInstanceOps:
         # Small no of pts cases:
         # base case: 1 or 2 pts
         if len(q_vals) < 3:
-            thr1 = (
-                global_thr
-                if np.max(q_vals) - np.min(q_vals) < config.threshold_params.MIN_GAP
-                else np.mean(q_vals)
-            )
+            # A 1-2 bubble strip (e.g. a True/False question) has no interior gap
+            # for the >=3 branch's loop to capture, so max1 stayed at MIN_JUMP and
+            # confidence upstream ((max1 - MIN_JUMP) / CONFIDENT_SURPLUS) was always
+            # 0 — force-flagging every T/F question for manual review even when read
+            # cleanly. Derive max1 the same way the >=3 case does, so a confident
+            # small strip reports confident. Detection (thr1) is unchanged.
+            spread = float(np.max(q_vals) - np.min(q_vals))
+            if spread < config.threshold_params.MIN_GAP:
+                # Uniform strip (both bubbles alike: all-filled or blank). No split
+                # to measure, so — as in the >=3 no_outliers case — take confidence
+                # from the strip's distance to the global threshold.
+                thr1 = global_thr
+                max1 = max(max1, abs(float(np.mean(q_vals)) - global_thr))
+            else:
+                # Clear filled/empty split: the gap between the two bubbles is the
+                # confidence signal (mirrors the largest-gap logic below).
+                thr1 = float(np.mean(q_vals))
+                max1 = max(max1, spread)
         else:
             # qmin, qmax, qmean, qstd = round(np.min(q_vals),2), round(np.max(q_vals),2),
             #   round(np.mean(q_vals),2), round(np.std(q_vals),2)
