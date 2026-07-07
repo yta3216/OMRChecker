@@ -650,13 +650,23 @@ class ImageInstanceOps:
         max1 = config.threshold_params.MIN_JUMP
 
         # Small no of pts cases:
-        # base case: 1 or 2 pts
+        # base case: 1 or 2 pts (e.g. a True/False strip has exactly 2 bubbles)
         if len(q_vals) < 3:
-            thr1 = (
-                global_thr
-                if np.max(q_vals) - np.min(q_vals) < config.threshold_params.MIN_GAP
-                else np.mean(q_vals)
-            )
+            if np.max(q_vals) - np.min(q_vals) < config.threshold_params.MIN_GAP:
+                # Uniform strip (both bubbles filled or both blank): no interior
+                # gap for max1 to capture. Mirror the >=3-bubble rescue below and
+                # derive confidence from the strip's distance to the global
+                # threshold, so a cleanly blank / all-filled T/F reads confidently.
+                thr1 = global_thr
+                max1 = max(max1, abs(float(np.mean(q_vals)) - global_thr))
+            else:
+                # A clear gap between the two bubbles IS the detection-confidence
+                # signal (same intensity units as max1 in the >=3-bubble path).
+                # Without raising max1 here a 2-bubble strip left it at its MIN_JUMP
+                # init, so every T/F question reported confidence 0 and flagged the
+                # whole sheet for review despite an unambiguous read.
+                thr1 = float(np.mean(q_vals))
+                max1 = max(max1, float(np.max(q_vals) - np.min(q_vals)))
         else:
             # qmin, qmax, qmean, qstd = round(np.min(q_vals),2), round(np.max(q_vals),2),
             #   round(np.mean(q_vals),2), round(np.std(q_vals),2)
