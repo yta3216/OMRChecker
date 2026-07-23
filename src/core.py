@@ -250,6 +250,14 @@ class ImageInstanceOps:
             # , "Mean Intensity Histogram",plot_show=True, sort_in_plot=True)
             global_thr, _, _ = self.get_global_threshold(all_q_vals, looseness=4)
 
+            # Sheet-wide contrast (p95 - p5 of all bubble intensities): how far
+            # apart "filled" and "empty" sit on THIS sheet. Faint pencil marks
+            # compress this range; confidence scoring below scales to it so a
+            # clean-but-faint sheet isn't mass-flagged by absolute constants.
+            sheet_contrast = float(
+                np.percentile(all_q_vals, 95) - np.percentile(all_q_vals, 5)
+            )
+
             logger.info(
                 f"Thresholding: \tglobal_thr: {round(global_thr, 2)} \tglobal_std_THR: {round(global_std_thresh, 2)}\t{'(Looks like a Xeroxed OMR)' if (global_thr == 255) else ''}"
             )
@@ -278,7 +286,7 @@ class ImageInstanceOps:
                     no_outliers = all_q_std_vals[total_q_strip_no] < global_std_thresh
                     # print(total_q_strip_no, field_block_bubbles[0].field_label,
                     #   all_q_std_vals[total_q_strip_no], "no_outliers:", no_outliers)
-                    per_q_strip_threshold, strip_max1 = self.get_local_threshold(
+                    per_q_strip_threshold, strip_signal = self.get_local_threshold(
                         all_q_strip_arrs[total_q_strip_no],
                         global_thr,
                         no_outliers,
@@ -288,9 +296,30 @@ class ImageInstanceOps:
                     # print(field_block_bubbles[0].field_label,key,block_q_strip_no, "THR: ",
                     #   round(per_q_strip_threshold,2))
                     per_omr_threshold_avg += per_q_strip_threshold
-                    _min_jump = config.threshold_params.MIN_JUMP
-                    _surplus = max(1, config.threshold_params.CONFIDENT_SURPLUS)
-                    strip_confidence = min(1.0, max(0.0, (strip_max1 - _min_jump) / _surplus))
+                    # Contrast-relative confidence (#426). The old formula
+                    # ((signal - MIN_JUMP) / CONFIDENT_SURPLUS) demanded an
+                    # absolute 25-30 gray-level gap for full confidence — pen-ink
+                    # scale. Faint pencil gaps of 15-35 scored near 0 and flooded
+                    # manual review. Instead: a strip is fully confident when its
+                    # signal covers a fraction (REL_SCALE) of this sheet's own
+                    # contrast range, never demanding more than the old absolute
+                    # bar (cap) and never trusting gaps at sensor-noise scale
+                    # (floor).
+                    tp = config.threshold_params
+                    _floor = tp.CONFIDENCE_NOISE_FLOOR
+                    _full = max(
+                        _floor + 2.0,
+                        min(
+                            tp.MIN_JUMP + tp.CONFIDENT_SURPLUS,
+                            tp.CONFIDENCE_REL_SCALE * sheet_contrast,
+                        ),
+                    )
+                    if strip_signal <= _floor:
+                        strip_confidence = 0.0
+                    else:
+                        strip_confidence = min(
+                            1.0, (strip_signal - _floor) / (_full - _floor)
+                        )
 
                     # Note: Little debugging visualization - view the particular Qstrip
                     # if(
@@ -646,30 +675,34 @@ class ImageInstanceOps:
         # Sort the Q bubbleValues
         q_vals = sorted(q_vals)
 
-        # max1 tracks the largest intensity gap found; used by callers for confidence scoring
+        # max1 tracks the largest intensity gap found, floored at MIN_JUMP; it
+        # drives threshold selection only. raw_signal is the same evidence
+        # WITHOUT the MIN_JUMP floor — the caller turns it into a confidence
+        # score, and flooring it would hand ambiguous strips a phantom
+        # MIN_JUMP-sized signal.
         max1 = config.threshold_params.MIN_JUMP
+        raw_signal = 0.0
 
         # Small no of pts cases:
         # base case: 1 or 2 pts
         if len(q_vals) < 3:
             # A 1-2 bubble strip (e.g. a True/False question) has no interior gap
-            # for the >=3 branch's loop to capture, so max1 stayed at MIN_JUMP and
-            # confidence upstream ((max1 - MIN_JUMP) / CONFIDENT_SURPLUS) was always
-            # 0 — force-flagging every T/F question for manual review even when read
-            # cleanly. Derive max1 the same way the >=3 case does, so a confident
-            # small strip reports confident. Detection (thr1) is unchanged.
+            # for the >=3 branch's loop to capture, so the raw signal stayed 0 and
+            # confidence upstream was always 0 — force-flagging every T/F question
+            # for manual review even when read cleanly. Derive the signal the same
+            # way the >=3 case does. Detection (thr1) is unchanged.
             spread = float(np.max(q_vals) - np.min(q_vals))
             if spread < config.threshold_params.MIN_GAP:
                 # Uniform strip (both bubbles alike: all-filled or blank). No split
-                # to measure, so — as in the >=3 no_outliers case — take confidence
+                # to measure, so — as in the >=3 no_outliers case — take the signal
                 # from the strip's distance to the global threshold.
                 thr1 = global_thr
-                max1 = max(max1, abs(float(np.mean(q_vals)) - global_thr))
+                raw_signal = abs(float(np.mean(q_vals)) - global_thr)
             else:
                 # Clear filled/empty split: the gap between the two bubbles is the
                 # confidence signal (mirrors the largest-gap logic below).
                 thr1 = float(np.mean(q_vals))
-                max1 = max(max1, spread)
+                raw_signal = spread
         else:
             # qmin, qmax, qmean, qstd = round(np.min(q_vals),2), round(np.max(q_vals),2),
             #   round(np.mean(q_vals),2), round(np.std(q_vals),2)
@@ -696,6 +729,9 @@ class ImageInstanceOps:
                 if jump > max1:
                     max1 = jump
                     thr1 = q_vals[i - 1] + jump / 2
+                # Ungated largest gap: even a below-MIN_JUMP jump is real
+                # evidence for confidence scoring (it just reads as low).
+                raw_signal = max(raw_signal, float(jump))
             # print(field_label,q_vals,max1)
 
             confident_jump = (
@@ -716,11 +752,15 @@ class ImageInstanceOps:
                     # threshold instead (same intensity units as max1): a uniform
                     # strip sitting far from the threshold is a confident detection,
                     # while one hugging the threshold stays low-confidence. Only
-                    # raises max1 (confidence); thr1 already decided, so detection
-                    # is unchanged.
-                    max1 = max(max1, abs(float(np.mean(q_vals)) - global_thr))
+                    # raises the confidence signal; thr1 already decided, so
+                    # detection is unchanged.
+                    raw_signal = max(
+                        raw_signal, abs(float(np.mean(q_vals)) - global_thr)
+                    )
                 else:
-                    # TODO: Low confidence parameters here
+                    # Non-uniform strip with only a small largest gap: genuinely
+                    # ambiguous. raw_signal already holds that small gap, so the
+                    # caller's confidence comes out low naturally.
                     pass
 
             # if(thr1 == 255):
@@ -742,7 +782,7 @@ class ImageInstanceOps:
             # appendSaveImg(6,getPlotImg())
             if plot_show:
                 plt.show()
-        return thr1, max1
+        return thr1, raw_signal
 
     def append_save_img(self, key, img):
         if self.save_image_level >= int(key):

@@ -13,6 +13,11 @@ CONFIG_DEFAULTS = DotMap(
             "MIN_GAP": 30,
             "MIN_JUMP": 25,
             "CONFIDENT_SURPLUS": 5,
+            # Confidence scoring (#426): gaps at or below the noise floor (gray
+            # levels) score 0; full confidence at REL_SCALE * sheet contrast
+            # (p95-p5), capped at MIN_JUMP + CONFIDENT_SURPLUS.
+            "CONFIDENCE_NOISE_FLOOR": 8,
+            "CONFIDENCE_REL_SCALE": 0.35,
             "JUMP_DELTA": 30,
             "PAGE_TYPE_FOR_THRESHOLD": "white",
         },

@@ -24,6 +24,16 @@ CONFIG_SCHEMA = {
                 "MIN_GAP": {"type": "integer", "minimum": 10, "maximum": 100},
                 "MIN_JUMP": {"type": "integer", "minimum": 10, "maximum": 100},
                 "CONFIDENT_SURPLUS": {"type": "integer", "minimum": 0, "maximum": 20},
+                "CONFIDENCE_NOISE_FLOOR": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 50,
+                },
+                "CONFIDENCE_REL_SCALE": {
+                    "type": "number",
+                    "minimum": 0.05,
+                    "maximum": 1,
+                },
                 "JUMP_DELTA": {"type": "integer", "minimum": 10, "maximum": 100},
                 "PAGE_TYPE_FOR_THRESHOLD": {
                     "enum": ["white", "black"],
